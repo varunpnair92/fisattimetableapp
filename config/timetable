@@ -1,0 +1,17 @@
+server {
+proxy_busy_buffers_size   512k;
+ proxy_buffers   4 512k;
+ proxy_buffer_size   256k;
+    listen 9999;
+    server_name 13.238.182.35:9999;
+
+   # location = /favicon.ico { access_log off; log_not_found off; }
+    location /static/ {
+        root /home/varun/fisattt;
+    }
+
+    location / {
+        include proxy_params;
+        proxy_pass http://unix:/run/timetable.sock;
+    }
+}
