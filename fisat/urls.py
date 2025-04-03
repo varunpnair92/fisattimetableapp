@@ -12,6 +12,7 @@ urlpatterns = [
     path('laballot_continue', views.allot_lab_slot_continue, name='allot_lab_slot_continue'),
     path('labexternal', views.labdetailsexternal, name='labexternal'),
     path('labdata_range', views.lab_allotment_range_view, name='labdata_range'),
+    path('delete_lab_allotment/<int:allotment_id>/', views.delete_lab_allotment, name='delete_lab_allotment'),
     
    
 

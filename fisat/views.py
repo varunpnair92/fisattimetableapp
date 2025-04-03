@@ -69,44 +69,69 @@ def lab_allotment_view(request):
 
 
 
+from datetime import datetime, timedelta
+from django.db.models import Q
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from .models import LabAllotment
 from .serializers import LabAllotmentSerializer
 
 @api_view(['POST'])
 def allot_lab_slot(request):
     data = request.data.copy()
 
-    # Ensure start_date exists and extract the day of the week
+    # Ensure start_date and end_date exist
     start_date_str = data.get('start_date')
-    if not start_date_str:
-        return Response({"error": "start_date is required"}, status=400)
+    end_date_str = data.get('end_date')
+    if not start_date_str or not end_date_str:
+        return Response({"error": "start_date and end_date are required"}, status=400)
 
     try:
-        start_date = datetime.strptime(start_date_str, "%d-%m-%Y")
-        day_of_week = start_date.strftime('%A')  # Extract full day name
+        start_date = datetime.strptime(start_date_str, "%d-%m-%Y").date()
+        end_date = datetime.strptime(end_date_str, "%d-%m-%Y").date()
     except ValueError:
-        return Response({"error": "Invalid start_date format. Use DD-MM-YYYY."}, status=400)
-
-    # If day_allotted is missing, populate it automatically
-    if 'day_allotted' not in data:
-        data['day_allotted'] = day_of_week  # Store the full name
+        return Response({"error": "Invalid date format. Use DD-MM-YYYY."}, status=400)
 
     lab_name = data.get('lab_name')
     hours_allotted = data.get('hours_allotted')
+    if not lab_name or not hours_allotted:
+        return Response({"error": "lab_name and hours_allotted are required"}, status=400)
 
-    # Check for conflicts (Same Lab, Same Day, Overlapping Hours)
-    existing_allotment = LabAllotment.objects.filter(
+    new_hours_set = set(map(int, hours_allotted.split(',')))
+    requested_day = start_date.strftime("%A")  # Get the weekday of the requested date
+
+    # Fetch all relevant lab allotments for the given lab and matching weekday
+    existing_allotments = LabAllotment.objects.filter(
         lab_name=lab_name,
-        day_allotted=day_of_week,
-        hours_allotted=hours_allotted
-    ).first()
+        day_allotted=requested_day  # Ensure it matches the repeating pattern
+    )
 
-    if existing_allotment:
+    conflicting_hours = set()
+
+    # Check if the requested date falls within any of the existing allotment ranges
+    for allotment in existing_allotments:
+        allotment_start = datetime.strptime(allotment.start_date, "%d-%m-%Y").date()
+        allotment_end = datetime.strptime(allotment.end_date, "%d-%m-%Y").date()
+        print(str(allotment_start)+""+str(allotment_end))
+        print("start"+str(start_date))
+
+        # If the requested date is within this range, check for hour conflicts
+        if allotment_start <= start_date <= allotment_end:
+            print("indise")
+            existing_hours_set = set(map(int, allotment.hours_allotted.split(",")))
+            overlap = new_hours_set & existing_hours_set
+            if overlap:
+                conflicting_hours.update(overlap)
+    print("conflict"+str(conflicting_hours))
+    if conflicting_hours:
+        print("confiolir")
         return Response(
-            {"error": f"Conflict detected! {lab_name} is already allotted on {day_of_week} for hour {hours_allotted}."},
+            {"error": f"Conflict detected! {lab_name} is already allotted for hours 123 {sorted(conflicting_hours)} on {requested_day}."},
             status=400
         )
 
     # If no conflict, save the allotment
+    data['day_allotted'] = requested_day  # Ensure the correct weekday is saved
     serializer = LabAllotmentSerializer(data=data)
     if serializer.is_valid():
         entries = serializer.save()
@@ -114,11 +139,6 @@ def allot_lab_slot(request):
         return Response(response_data, status=201)
 
     return Response(serializer.errors, status=400)
-
-
-
-
-
 
 
     
@@ -221,3 +241,18 @@ def lab_allotment_range_view(request):
         })
 
     return Response(grouped_data)
+
+
+
+#delete data
+from .models import LabAllotment
+
+@api_view(['DELETE'])
+def delete_lab_allotment(request, allotment_id):
+    try:
+        allotment = LabAllotment.objects.get(id=allotment_id)
+        allotment.delete()
+        return Response({"message": "Allotment deleted successfully"}, status=200)
+    except LabAllotment.DoesNotExist:
+        return Response({"error": "Allotment not found"}, status=404)
+

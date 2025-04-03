@@ -56,29 +56,42 @@ class LabAllotmentSerializer(serializers.ModelSerializer):
         lab_name = validated_data['lab_name']
         hours_allotted = validated_data['hours_allotted']
 
-        # ✅ Convert hours_allotted to a list (assuming it's a comma-separated string)
-        allotted_hours_list = list(map(int, hours_allotted.split(',')))  
+        # ✅ Convert hours_allotted to a set for fast lookup
+        allotted_hours_set = set(map(int, hours_allotted.split(',')))
 
         # ✅ Auto-calculate `day_allotted` if missing
         start_date = datetime.strptime(start_date_str, "%d-%m-%Y")
         day_allotted = validated_data.get('day_allotted', start_date.strftime('%A'))  
         validated_data['day_allotted'] = day_allotted  # Ensure it's included
+        new_hours_set = set(map(int, hours_allotted.split(',')))
 
-        # ✅ Check for existing conflicts (using list overlap)
-        existing_allotments = LabAllotment.objects.filter(
+        # ✅ Fetch existing allotments that overlap in date and weekday
+        allotments = LabAllotment.objects.filter(
             lab_name=lab_name,
-            day_allotted=day_allotted
-        ).values_list('hours_allotted', flat=True)  
+            day_allotted=day_allotted,
+        )
 
-        conflicting_hours = []
-        for existing_hours in existing_allotments:
-            existing_hours_list = list(map(int, existing_hours.split(',')))
-            # Check if any hour in allotted_hours_list exists in existing_hours_list
-            if any(hour in existing_hours_list for hour in allotted_hours_list):
-                conflicting_hours.extend(existing_hours_list)
+        # ✅ Check for hour conflicts
+        conflicting_hours = set()
+        for allotment in allotments:
+            allotment_start = datetime.strptime(allotment.start_date, "%d-%m-%Y").date()
+            allotment_end = datetime.strptime(allotment.end_date, "%d-%m-%Y").date()
+            print(f"Allotment Start: {allotment_start}, Allotment End: {allotment_end}")
+            print(f"Requested Start: {start_date.date()}")  # Convert to date for comparison
 
+            # Convert `start_date` to date before comparison
+            if allotment_start <= start_date.date() <= allotment_end:
+                print("Inside date range check")
+                existing_hours_set = set(map(int, allotment.hours_allotted.split(",")))
+                overlap = new_hours_set & existing_hours_set
+                if overlap:
+                    conflicting_hours.update(overlap)
+
+        # ✅ If conflict detected, raise an error
         if conflicting_hours:
-            raise serializers.ValidationError({"error": f"Conflict! {lab_name} already allotted on {day_allotted} for hours {conflicting_hours}."})
+            raise serializers.ValidationError({
+                "error": f"Conflict! {lab_name} already allotted on {day_allotted} for hours {sorted(conflicting_hours)}."
+            })
 
         # ✅ If no conflict, proceed with saving
         new_entries = []
@@ -95,6 +108,7 @@ class LabAllotmentSerializer(serializers.ModelSerializer):
             new_entries.append(new_entry)
 
         return new_entries if len(new_entries) > 1 else new_entries[0]
+
 
 
 

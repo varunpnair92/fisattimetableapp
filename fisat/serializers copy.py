@@ -99,6 +99,8 @@ class LabAllotmentSerializer(serializers.ModelSerializer):
 
 
 
+from datetime import datetime, timedelta
+from rest_framework import serializers
 from .models import LabAllotment
 
 class LabAllotmentContinueSerializer(serializers.ModelSerializer):
@@ -112,11 +114,14 @@ class LabAllotmentContinueSerializer(serializers.ModelSerializer):
         start_date_str = validated_data['start_date']
         end_date_str = validated_data['end_date']
         lab_name = validated_data['lab_name']
-        day_allotted = validated_data['day_allotted']
         hours_allotted = validated_data['hours_allotted']
 
         start_date = datetime.strptime(start_date_str, "%d-%m-%Y")
         end_date = datetime.strptime(end_date_str, "%d-%m-%Y")
+
+        # If 'day_allotted' is missing, calculate it from start_date
+        day_allotted = validated_data.get('day_allotted', start_date.strftime('%A'))
+        validated_data['day_allotted'] = day_allotted  # Ensure it's included
 
         new_entries = []
         if allot == 'continue':
