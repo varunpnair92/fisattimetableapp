@@ -256,3 +256,98 @@ def delete_lab_allotment(request, allotment_id):
     except LabAllotment.DoesNotExist:
         return Response({"error": "Allotment not found"}, status=404)
 
+
+
+
+
+
+from datetime import datetime
+from collections import defaultdict
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from .models import LabAllotment
+from .serializers import LabAllotmentSerializer
+
+from datetime import datetime
+from collections import defaultdict
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from .models import LabAllotment
+from .serializers import LabAllotmentSerializer
+
+@api_view(['POST'])
+def lab_allotment_view_free(request):
+    date_str = request.data.get('date', None)
+
+    if not date_str:
+        return Response({"error": "Date parameter is required."}, status=400)
+
+    try:
+        selected_date = datetime.strptime(date_str, '%d-%m-%Y').date()
+        day_of_week = selected_date.strftime('%A')
+    except ValueError:
+        return Response({"error": "Invalid date format. Use DD-MM-YYYY."}, status=400)
+
+    # ✅ Get all labs from database
+    all_lab_names = set(LabAllotment.objects.values_list('lab_name', flat=True))
+
+    # Fetch existing allotments for the given date
+    existing_allotments = LabAllotment.objects.filter(day_allotted=day_of_week).order_by('id')
+
+    occupied_slots = defaultdict(set)  # Store occupied slots per lab
+    latest_allotments = {}
+
+    for allotment in existing_allotments:
+        allotment_start = datetime.strptime(allotment.start_date, "%d-%m-%Y").date()
+        allotment_end = datetime.strptime(allotment.end_date, "%d-%m-%Y").date()
+
+        if allotment_start <= selected_date <= allotment_end:
+            lab_name = allotment.lab_name
+            hours = set(map(int, allotment.hours_allotted.split(",")))
+
+            for hour in hours:
+                key = (lab_name, hour)
+
+                if key not in latest_allotments:
+                    latest_allotments[key] = allotment
+                else:
+                    if allotment.id > latest_allotments[key].id:
+                        latest_allotments[key] = allotment
+
+                occupied_slots[lab_name].add(hour)
+
+    # Define all possible slots
+    all_slots = {1, 2, 3, 4, 5, 6, 7}
+    grouped_data = defaultdict(list)
+    free_slots_data = []
+
+    # ✅ Ensure all labs are considered (even those without any allotments)
+    for lab in all_lab_names:
+        occupied_hours = occupied_slots.get(lab, set())
+        free_hours = sorted(all_slots - occupied_hours)
+
+        if free_hours:
+            free_slots_data.append({
+                "lab_name": lab,
+                "hours_free": ",".join(map(str, free_hours))
+            })
+
+    # Group occupied slots per lab
+    for (lab_name, hour), allotment in latest_allotments.items():
+        grouped_data[lab_name].append({
+            'id': allotment.id,
+            'class_name': allotment.class_name,
+            'subject_name': allotment.subject_name,
+            'day': allotment.day_allotted,
+            'hours': hour,
+            'start_date': allotment.start_date,
+            'end_date': allotment.end_date,
+            'external': allotment.external
+        })
+
+    return Response({
+        #"occupied_slots": grouped_data,
+        "free_slots": free_slots_data
+    })
+
+
