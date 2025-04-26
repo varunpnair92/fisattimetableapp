@@ -1,10 +1,10 @@
 from datetime import datetime
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
-from .models import LabAllotment
+from .models import LabAllotment,User
 from .serializers import LabAllotmentSerializer
 from collections import defaultdict
-
+from django.db.models import Q
 
 
 
@@ -292,7 +292,10 @@ def lab_allotment_view_free(request):
     all_lab_names = set(LabAllotment.objects.values_list('lab_name', flat=True))
 
     # Fetch existing allotments for the given date
-    existing_allotments = LabAllotment.objects.filter(day_allotted=day_of_week).order_by('id')
+    #existing_allotments = LabAllotment.objects.filter(day_allotted=day_of_week).order_by('id')
+    existing_allotments = LabAllotment.objects.filter(
+    Q(day_allotted=day_of_week) | Q(day_allotted=date_str)
+).order_by('id')
 
     occupied_slots = defaultdict(set)  # Store occupied slots per lab
     latest_allotments = {}
@@ -349,5 +352,19 @@ def lab_allotment_view_free(request):
         #"occupied_slots": grouped_data,
         "free_slots": free_slots_data
     })
+    
+#get user details
 
+@api_view(['GET'])
+def get_user_privilege(request):
+    email = request.GET.get('email')
+
+    if not email:
+        return Response({'error': 'Email parameter is required.'}, status=400)
+
+    try:
+        user = User.objects.get(email=email)
+        return Response({'privilege': user.privilege})
+    except User.DoesNotExist:
+        return Response({'error': 'User not found'}, status=404)
 

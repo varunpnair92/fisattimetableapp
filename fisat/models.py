@@ -30,3 +30,15 @@ def auto_fill_day_allotted(sender, instance, **kwargs):
         except ValueError:
             pass  # Handle the case where start_date format is incorrect
 
+
+#sign in table
+
+class User(models.Model):
+    email = models.EmailField(unique=True)
+    name = models.CharField(max_length=100)
+    privilege = models.IntegerField(default=0)  # 1 for admin, 0 for normal user
+
+    def __str__(self):
+        return self.email
+    class Meta:
+        db_table = 'user_table'
