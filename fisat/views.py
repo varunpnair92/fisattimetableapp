@@ -7,64 +7,139 @@ from collections import defaultdict
 from django.db.models import Q
 
 
+#old data only selected lates id 
+# @api_view(['POST'])
+# def lab_allotment_view(request):
+#     date_str = request.data.get('date', None)
+    
+#     if date_str is None:
+#         return Response({"error": "Date parameter is required."}, status=400)
+    
+#     try:
+#         date = datetime.strptime(date_str, '%d-%m-%Y')
+#         day_of_week = date.strftime('%A')
+#     except ValueError:
+#         return Response({"error": "Invalid date format. Use DD-MM-YYYY."}, status=400)
+    
+#     # Map days to short form (if applicable)
+#     day_map = {'Monday': 'M', 'Tuesday': 'T', 'Wednesday': 'W', 'Thursday': 'Th', 'Friday': 'F'}
+#     day_code = day_map.get(day_of_week)
+
+#     if not day_code:
+#         return Response({"error": "No allotments available for weekends."}, status=400)
+    
+#     # Fetch all allotments for the given day
+#     lab_allotments = LabAllotment.objects.filter(day_allotted=day_of_week).order_by('id')  # Ensure ordered by ID
+#     serializer = LabAllotmentSerializer(lab_allotments, many=True)
+
+#     # Dictionary to store latest allotments per (lab, time slot)
+#     latest_allotments = {}
+
+#     for allotment in serializer.data:
+#         lab_name = allotment['lab_name']
+#         hours = allotment['hours_allotted'].split(',')  # Keep time range as strings
+#         allotment_id = allotment['id']  # Use ID to determine latest entry
+
+#         for hour in hours:
+#             key = (lab_name, hour)  # Unique per lab & time slot
+
+#             if key not in latest_allotments:
+#                 latest_allotments[key] = allotment  # First entry
+#             else:
+#                 # Keep the latest allotment based on ID (newer entries have higher IDs)
+#                 if allotment_id > latest_allotments[key]['id']:
+#                     latest_allotments[key] = allotment
+
+#     # **Group Data by Lab Name**
+#     grouped_data = defaultdict(list)
+
+#     for (lab_name, hour), allotment in latest_allotments.items():
+#         grouped_data[lab_name].append({
+#             'class_name': allotment['class_name'],
+#             'subject_name': allotment['subject_name'],
+#             'day': allotment['day_allotted'],
+#             'hours': hour,  # Use time range as-is
+#             'start_date': allotment['start_date'],
+#             'end_date': allotment['end_date'],
+#             'external': allotment['external']
+#         })
+
+#     return Response(grouped_data)
+
+
+
+from datetime import datetime
+from collections import defaultdict
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from django.db.models import Q
+from .models import LabAllotment
+from .serializers import LabAllotmentSerializer
 
 @api_view(['POST'])
 def lab_allotment_view(request):
     date_str = request.data.get('date', None)
     
-    if date_str is None:
+    if not date_str:
         return Response({"error": "Date parameter is required."}, status=400)
     
     try:
-        date = datetime.strptime(date_str, '%d-%m-%Y')
-        day_of_week = date.strftime('%A')
+        selected_date = datetime.strptime(date_str, "%d-%m-%Y").date()
+        day_of_week = selected_date.strftime('%A')
     except ValueError:
         return Response({"error": "Invalid date format. Use DD-MM-YYYY."}, status=400)
-    
-    # Map days to short form (if applicable)
-    day_map = {'Monday': 'M', 'Tuesday': 'T', 'Wednesday': 'W', 'Thursday': 'Th', 'Friday': 'F'}
-    day_code = day_map.get(day_of_week)
 
-    if not day_code:
-        return Response({"error": "No allotments available for weekends."}, status=400)
-    
-    # Fetch all allotments for the given day
-    lab_allotments = LabAllotment.objects.filter(day_allotted=day_of_week).order_by('id')  # Ensure ordered by ID
-    serializer = LabAllotmentSerializer(lab_allotments, many=True)
+    # Fetch all allotments (weekly + one-time)
+    allotments = LabAllotment.objects.filter(
+        Q(day_allotted=day_of_week) | Q(day_allotted=date_str)
+    ).order_by('id')
 
-    # Dictionary to store latest allotments per (lab, time slot)
     latest_allotments = {}
 
-    for allotment in serializer.data:
-        lab_name = allotment['lab_name']
-        hours = allotment['hours_allotted'].split(',')  # Keep time range as strings
-        allotment_id = allotment['id']  # Use ID to determine latest entry
+    for allotment in allotments:
+        try:
+            start = datetime.strptime(allotment.start_date, "%d-%m-%Y").date()
+            end = datetime.strptime(allotment.end_date, "%d-%m-%Y").date()
+        except ValueError:
+            continue  # Skip invalid date records
 
-        for hour in hours:
-            key = (lab_name, hour)  # Unique per lab & time slot
+        is_valid = False
 
-            if key not in latest_allotments:
-                latest_allotments[key] = allotment  # First entry
-            else:
-                # Keep the latest allotment based on ID (newer entries have higher IDs)
-                if allotment_id > latest_allotments[key]['id']:
+        # One-time allotment (e.g., day_allotted = "29-04-2025")
+        if allotment.day_allotted == date_str:
+            is_valid = True
+
+        # Weekly allotment (e.g., day_allotted = "Tuesday")
+        elif allotment.day_allotted == day_of_week and start <= selected_date <= end:
+            is_valid = True
+
+        if is_valid:
+            lab = allotment.lab_name
+            hours = allotment.hours_allotted.split(",")
+
+            for hour in hours:
+                key = (lab, hour.strip())
+                if key not in latest_allotments or allotment.id > latest_allotments[key].id:
                     latest_allotments[key] = allotment
 
-    # **Group Data by Lab Name**
+    # Group by lab name
     grouped_data = defaultdict(list)
 
     for (lab_name, hour), allotment in latest_allotments.items():
         grouped_data[lab_name].append({
-            'class_name': allotment['class_name'],
-            'subject_name': allotment['subject_name'],
-            'day': allotment['day_allotted'],
-            'hours': hour,  # Use time range as-is
-            'start_date': allotment['start_date'],
-            'end_date': allotment['end_date'],
-            'external': allotment['external']
+            'class_name': allotment.class_name,
+            'subject_name': allotment.subject_name,
+            'day': allotment.day_allotted,
+            'hours': hour,
+            'start_date': allotment.start_date,
+            'end_date': allotment.end_date,
+            'external': allotment.external
         })
 
     return Response(grouped_data)
+
+
+
 
 
 
@@ -263,17 +338,10 @@ def delete_lab_allotment(request, allotment_id):
 
 from datetime import datetime
 from collections import defaultdict
+from django.db.models import Q
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from .models import LabAllotment
-from .serializers import LabAllotmentSerializer
-
-from datetime import datetime
-from collections import defaultdict
-from rest_framework.decorators import api_view
-from rest_framework.response import Response
-from .models import LabAllotment
-from .serializers import LabAllotmentSerializer
 
 @api_view(['POST'])
 def lab_allotment_view_free(request):
@@ -288,71 +356,61 @@ def lab_allotment_view_free(request):
     except ValueError:
         return Response({"error": "Invalid date format. Use DD-MM-YYYY."}, status=400)
 
-    # ✅ Get all labs from database
     all_lab_names = set(LabAllotment.objects.values_list('lab_name', flat=True))
 
-    # Fetch existing allotments for the given date
-    #existing_allotments = LabAllotment.objects.filter(day_allotted=day_of_week).order_by('id')
-    existing_allotments = LabAllotment.objects.filter(
-    Q(day_allotted=day_of_week) | Q(day_allotted=date_str)
-).order_by('id')
+    # Fetch all allotments matching day or specific date
+    all_allotments = LabAllotment.objects.filter(
+        Q(day_allotted=day_of_week)
+    ).order_by('id')
 
-    occupied_slots = defaultdict(set)  # Store occupied slots per lab
+    occupied_slots = defaultdict(set)
     latest_allotments = {}
 
-    for allotment in existing_allotments:
-        allotment_start = datetime.strptime(allotment.start_date, "%d-%m-%Y").date()
-        allotment_end = datetime.strptime(allotment.end_date, "%d-%m-%Y").date()
+    for allotment in all_allotments:
+        try:
+            start = datetime.strptime(allotment.start_date, '%d-%m-%Y').date()
+            end = datetime.strptime(allotment.end_date, '%d-%m-%Y').date()
+        except:
+            continue  # skip bad records
 
-        if allotment_start <= selected_date <= allotment_end:
-            lab_name = allotment.lab_name
-            hours = set(map(int, allotment.hours_allotted.split(",")))
+        is_valid = False
+
+        
+        if allotment.day_allotted == day_of_week:
+            print(day_of_week,allotment.day_allotted)
+            if start <= selected_date <= end:
+                print("inside ")
+                is_valid = True
+
+        if is_valid:
+            lab = allotment.lab_name
+            try:
+                hours = set(map(int, allotment.hours_allotted.split(',')))
+            except:
+                continue  # skip broken hour format
 
             for hour in hours:
-                key = (lab_name, hour)
-
-                if key not in latest_allotments:
+                key = (lab, hour)
+                if key not in latest_allotments or allotment.id > latest_allotments[key].id:
                     latest_allotments[key] = allotment
-                else:
-                    if allotment.id > latest_allotments[key].id:
-                        latest_allotments[key] = allotment
+                occupied_slots[lab].add(hour)
 
-                occupied_slots[lab_name].add(hour)
+    all_hours = {1, 2, 3, 4, 5, 6, 7}
+    free_slots = []
 
-    # Define all possible slots
-    all_slots = {1, 2, 3, 4, 5, 6, 7}
-    grouped_data = defaultdict(list)
-    free_slots_data = []
-
-    # ✅ Ensure all labs are considered (even those without any allotments)
     for lab in all_lab_names:
-        occupied_hours = occupied_slots.get(lab, set())
-        free_hours = sorted(all_slots - occupied_hours)
-
-        if free_hours:
-            free_slots_data.append({
+        occupied = occupied_slots.get(lab, set())
+        free = sorted(all_hours - occupied)
+        if free:
+            free_slots.append({
                 "lab_name": lab,
-                "hours_free": ",".join(map(str, free_hours))
+                "hours_free": ",".join(map(str, free))
             })
 
-    # Group occupied slots per lab
-    for (lab_name, hour), allotment in latest_allotments.items():
-        grouped_data[lab_name].append({
-            'id': allotment.id,
-            'class_name': allotment.class_name,
-            'subject_name': allotment.subject_name,
-            'day': allotment.day_allotted,
-            'hours': hour,
-            'start_date': allotment.start_date,
-            'end_date': allotment.end_date,
-            'external': allotment.external
-        })
+    return Response({"free_slots": free_slots})
 
-    return Response({
-        #"occupied_slots": grouped_data,
-        "free_slots": free_slots_data
-    })
-    
+
+
 #get user details
 
 @api_view(['GET'])
